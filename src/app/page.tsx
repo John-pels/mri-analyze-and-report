@@ -1,7 +1,9 @@
+import { LandingPage } from "@/components/screen";
+
 export default function Home() {
   return (
     <div>
-      <h1>Hello World</h1>
+      <LandingPage />
     </div>
   );
 }

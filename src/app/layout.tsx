@@ -1,9 +1,9 @@
 import type React from "react"
 import "@/app/globals.css"
 import { Poppins } from "next/font/google"
-// import { ThemeProvider } from "@/components/theme-provider"
-// import { Toaster } from "@/components/ui/toaster"
-// import { ThemeToggle } from "@/components/theme-toggle"
+import { ThemeProvider } from "@/components/theme-provider"
+import { ThemeToggle } from "@/components/theme-toggle"
+import { Toaster } from "@/components/ui/toaster"
 
 const poppins = Poppins({
   weight: ["400", "500", "600", "700"],
@@ -12,7 +12,7 @@ const poppins = Poppins({
 
 export const metadata = {
   title: "Medical Image Analysis Assistant",
-  description: "Analyze medical images using CNN and LLM technology",
+  description: "An AI-powered web application that uses Convolutional Neural Networks (CNN) and Large Language Models (LLM) to analyze medical images and provide detailed insights.",
   icons: {
     icon: "/favicon.ico",
   },
@@ -26,13 +26,13 @@ export default function RootLayout({
   return (
     <html lang="en" suppressHydrationWarning>
       <body className={poppins.className}>
-        {/* <ThemeProvider attribute="class" defaultTheme="system" enableSystem> */}
-        <div className="fixed top-4 right-4 z-50">
-          {/* <ThemeToggle /> */}
-        </div>
-        {children}
-        {/* <Toaster />
-        </ThemeProvider> */}
+        <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
+          <div className="fixed top-4 right-4 z-50">
+            <ThemeToggle />
+          </div>
+          {children}
+          <Toaster />
+        </ThemeProvider>
       </body>
     </html>
   )
