@@ -205,15 +205,15 @@ export function LandingPage() {
                         />
                     </div>
 
-                    <Button type="button" onClick={handleAnalysis} disabled={!selectedImage || status === "loading"} className="w-full">
+                    <Button type="button" onClick={handleAnalysis} disabled={!selectedImage || status === "loading"} className="w-full text-white">
                         {status === "loading" ? (
                             <>
-                                <Loader2 className="h-5 w-5 mr-2 animate-spin" />
+                                <Loader2 className="h-5 w-5 mr-2 animate-spin text-white" />
                                 Analyzing...
                             </>
                         ) : (
                             <>
-                                <FlaskConical className="h-5 w-5 mr-2" />
+                                <FlaskConical className="h-5 w-5 mr-2 text-white" />
                                 Analyze Medical Image
                             </>
                         )}

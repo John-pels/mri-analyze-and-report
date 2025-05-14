@@ -43,10 +43,6 @@ export function useImageAnalysis() {
         setImagePreview(reader.result as string);
       };
       reader.readAsDataURL(file);
-      toast({
-        title: "Image uploaded successfully",
-        description: `File: ${file.name}`,
-      });
     } else {
       toast({
         variant: "destructive",
