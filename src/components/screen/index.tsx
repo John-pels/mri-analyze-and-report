@@ -162,15 +162,18 @@ export function LandingPage() {
                         <TabsList className="grid grid-cols-3 mb-4">
                             <TabsTrigger value="general">
                                 <Scan className="h-5 w-5 mr-2" />
-                                General Analysis
+                                <span className="hidden md:inline md:mr-1">General</span>
+                                Analysis
                             </TabsTrigger>
                             <TabsTrigger value="detailed">
                                 <BrainCircuit className="h-5 w-5 mr-2" />
-                                Detailed Report
+                                <span className="hidden md:inline md:mr-1">Detailed</span>
+                                Report
                             </TabsTrigger>
                             <TabsTrigger value="medical">
                                 <ClipboardList className="h-5 w-5 mr-2" />
-                                Medical Insights
+                                <span className="hidden md:inline md:mr-1">Medical</span>
+                                Insights
                             </TabsTrigger>
                         </TabsList>
 

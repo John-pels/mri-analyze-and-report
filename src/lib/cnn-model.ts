@@ -1,6 +1,5 @@
 import * as tf from "@tensorflow/tfjs";
 
-// Model state
 const models: Record<string, tf.LayersModel | null> = {
   mri: null,
   ct: null,
@@ -206,10 +205,13 @@ async function preprocessImage(
   imageBuffer: ArrayBuffer,
   imageType: string
 ): Promise<tf.Tensor4D> {
-  // Convert the image buffer to a tensor
-  const image = await tf.browser.fromPixelsAsync(
-    await createImageBitmap(new Blob([imageBuffer]))
-  );
+  // Convert the image buffer to a tensor using sharp
+  const sharp = require("sharp");
+  const imageData = await sharp(Buffer.from(imageBuffer))
+    .resize(224, 224)
+    .raw()
+    .toBuffer();
+  const image = tf.tensor3d(new Uint8Array(imageData), [224, 224, 3]);
 
   // Resize to the expected input size (224x224)
   const resized = tf.image.resizeBilinear(image, [224, 224]);

@@ -1,7 +1,6 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { analyzeWithCNN } from "@/lib/cnn-model";
-import { generateText } from "ai";
-import { openai } from "@ai-sdk/openai";
+import { GoogleGenerativeAI } from "@google/generative-ai";
 
 export async function POST(request: NextRequest) {
   try {
@@ -10,7 +9,10 @@ export async function POST(request: NextRequest) {
     const imageFile = formData.get("image") as File | null;
     const prompt = formData.get("prompt") as string | null;
     const imageType = (formData.get("imageType") as string) || "mri";
-    const apiKey = process.env.NEXT_PUBLIC_OPENAI_API_KEY;
+    // const apiKey = process.env.OPENAI_API_KEY!;
+    const geminiKey = process.env.GEMINI_API_KEY!;
+
+    console.log("api key", geminiKey);
 
     // Validate inputs
     if (!imageFile) {
@@ -65,11 +67,21 @@ If there are any indications of brain tumors in the analysis, please provide:
 `;
     }
 
-    // Use the LLM to generate a detailed analysis
-    const { text } = await generateText({
-      model: openai("gpt-4-turbo"),
-      prompt: analysisPrompt,
+    // // Use the LLM to generate a detailed analysis
+    // const { text } = await generateText({
+    //   model: openai("gpt-3.5-turbo-instruct"),
+    //   prompt: analysisPrompt,
+    // });
+
+    // Initialize Gemini
+    const genAI = new GoogleGenerativeAI(geminiKey);
+    const model = genAI.getGenerativeModel({ model: "gemini-1.5-pro" }); // Specify the model
+
+    // Generate content with Gemini
+    const result = await model.generateContent({
+      contents: [{ role: "user", parts: [{ text: analysisPrompt }] }],
     });
+    const text = result.response.text();
 
     // Return the analysis results
     return NextResponse.json({
