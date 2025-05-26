@@ -7,10 +7,7 @@ interface UseDropzoneHandlerProps {
   maxFiles?: number;
 }
 
-export function useDropzoneHandler({
-  onImageUpload,
-  maxFiles = 1,
-}: UseDropzoneHandlerProps) {
+export function useDropzoneHandler({ onImageUpload, maxFiles = 1 }: UseDropzoneHandlerProps) {
   const onDrop = (acceptedFiles: File[]) => {
     const file = acceptedFiles[0];
     if (!file) return;

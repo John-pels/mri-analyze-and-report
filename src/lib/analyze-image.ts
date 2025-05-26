@@ -1,8 +1,17 @@
+import { RegionOfInterest } from "@/types/medical-analysis";
+
+interface ImageAnalysisResult {
+  analysis: string;
+  regions: RegionOfInterest[];
+  error?: string;
+  // Add other specific fields that your API returns
+}
+
 export async function analyzeImage(
   image: File,
   prompt: string,
   imageType = "mri"
-): Promise<any> {
+): Promise<ImageAnalysisResult> {
   try {
     // Create a FormData object to send the image and prompt to the server
     const formData = new FormData();
@@ -25,7 +34,7 @@ export async function analyzeImage(
 
     // Parse and return the analysis results
     const result = await response.json();
-    return result;
+    return result as ImageAnalysisResult;
   } catch (error) {
     console.error("Error analyzing image:", error);
     throw new Error(

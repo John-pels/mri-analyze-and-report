@@ -4,6 +4,7 @@ import { useState } from "react";
 
 import { analyzeImage } from "@/lib/analyze-image";
 import { useToast } from "./use-toast";
+import { RegionOfInterest } from "@/types/medical-analysis";
 
 type AnalysisType = "general" | "detailed" | "medical";
 type AnalysisStatus = "idle" | "loading" | "success" | "error";
@@ -18,7 +19,9 @@ export function useImageAnalysis() {
   const [analysisResult, setAnalysisResult] = useState<string>("");
   const [status, setStatus] = useState<AnalysisStatus>("idle");
   const [showRegions, setShowRegions] = useState(true);
-  const [regionsOfInterest, setRegionsOfInterest] = useState<any[]>([]);
+  const [regionsOfInterest, setRegionsOfInterest] = useState<
+    RegionOfInterest[]
+  >([]);
   const { toast } = useToast();
 
   const handleImageUpload = (file: File) => {

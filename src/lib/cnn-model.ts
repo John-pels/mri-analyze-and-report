@@ -1,20 +1,69 @@
+import { CNNAnalysisResult } from "@/types/medical-analysis";
 import * as tf from "@tensorflow/tfjs";
 
-const models: Record<string, tf.LayersModel | null> = {
+// Define types for better type safety
+type ImageType = "mri" | "ct" | "xray" | "ultrasound";
+
+interface LayerConfig {
+  filters: number;
+  kernelSize: number;
+  dropout?: number;
+}
+
+interface RegionOfInterest {
+  id: number;
+  location: {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+  };
+  confidence: number;
+  classification: string;
+  intensity: string;
+}
+
+interface FeatureAnalysis {
+  summary: string;
+  dimensionality: number;
+  sample: number[];
+}
+
+interface PredictionAnalysis {
+  categories: string[];
+  confidenceScores: number[];
+}
+
+interface AnalysisMetadata {
+  modelArchitecture: string;
+  inputDimensions: string;
+  processingTime: string;
+  confidenceThreshold: number;
+  imageType: string;
+}
+
+interface AnalysisResult {
+  features: FeatureAnalysis;
+  predictions: PredictionAnalysis;
+  regionsOfInterest: RegionOfInterest[];
+  analysisMetadata: AnalysisMetadata;
+}
+
+const models: Record<ImageType, tf.LayersModel | null> = {
   mri: null,
   ct: null,
   xray: null,
   ultrasound: null,
 };
 
-const modelLoaded: Record<string, boolean> = {
+const modelLoaded: Record<ImageType, boolean> = {
   mri: false,
   ct: false,
   xray: false,
   ultrasound: false,
 };
 
-const modelLoading: Record<string, boolean> = {
+const modelLoading: Record<ImageType, boolean> = {
   mri: false,
   ct: false,
   xray: false,
@@ -22,7 +71,7 @@ const modelLoading: Record<string, boolean> = {
 };
 
 // Initialize and load the CNN model for a specific image type
-async function loadModel(imageType: string) {
+async function loadModel(imageType: ImageType): Promise<void> {
   if (!Object.keys(models).includes(imageType)) {
     throw new Error(`Unsupported image type: ${imageType}`);
   }
@@ -49,7 +98,7 @@ async function loadModel(imageType: string) {
 
 // Create a CNN model architecture for different medical image types
 async function createMedicalImageModel(
-  imageType: string
+  imageType: ImageType
 ): Promise<tf.LayersModel> {
   // This is a simplified CNN architecture for demonstration
   // In a real application, you would use a more sophisticated architecture
@@ -136,7 +185,7 @@ async function createMedicalImageModel(
 }
 
 // Helper functions for model configuration based on image type
-function getInitialFilters(imageType: string): number {
+function getInitialFilters(imageType: ImageType): number {
   switch (imageType) {
     case "mri":
       return 32;
@@ -151,9 +200,7 @@ function getInitialFilters(imageType: string): number {
   }
 }
 
-function getLayerConfig(
-  imageType: string
-): Array<{ filters: number; kernelSize: number; dropout?: number }> {
+function getLayerConfig(imageType: ImageType): LayerConfig[] {
   switch (imageType) {
     case "mri":
       return [
@@ -185,7 +232,7 @@ function getLayerConfig(
   }
 }
 
-function getOutputUnits(imageType: string): number {
+function getOutputUnits(imageType: ImageType): number {
   switch (imageType) {
     case "mri":
       return 10;
@@ -203,7 +250,7 @@ function getOutputUnits(imageType: string): number {
 // Preprocess the image for the CNN model
 async function preprocessImage(
   imageBuffer: ArrayBuffer,
-  imageType: string
+  imageType: ImageType
 ): Promise<tf.Tensor4D> {
   // Convert the image buffer to a tensor using sharp
   const sharp = require("sharp");
@@ -217,7 +264,7 @@ async function preprocessImage(
   const resized = tf.image.resizeBilinear(image, [224, 224]);
 
   // Convert to grayscale for MRI and CT, keep color channels for others
-  let processed;
+  let processed: tf.Tensor3D;
   if (imageType === "mri" || imageType === "ct") {
     processed = resized.mean(2, true);
   } else {
@@ -243,8 +290,8 @@ async function preprocessImage(
 // Extract features from the CNN model
 async function extractFeatures(
   preprocessedImage: tf.Tensor4D,
-  imageType: string
-): Promise<any> {
+  imageType: ImageType
+): Promise<number[][]> {
   const model = models[imageType];
   if (!model) {
     throw new Error(`Model for ${imageType} not loaded`);
@@ -262,7 +309,7 @@ async function extractFeatures(
   ) as tf.Tensor;
 
   // Convert to a JavaScript array
-  const featureArray = await features.array();
+  const featureArray = (await features.array()) as number[][];
 
   // Clean up
   features.dispose();
@@ -273,8 +320,8 @@ async function extractFeatures(
 // Run a forward pass through the model to get predictions
 async function getPredictions(
   preprocessedImage: tf.Tensor4D,
-  imageType: string
-): Promise<any> {
+  imageType: ImageType
+): Promise<number[][]> {
   const model = models[imageType];
   if (!model) {
     throw new Error(`Model for ${imageType} not loaded`);
@@ -284,7 +331,7 @@ async function getPredictions(
   const predictions = model.predict(preprocessedImage) as tf.Tensor;
 
   // Convert to a JavaScript array
-  const predictionArray = await predictions.array();
+  const predictionArray = (await predictions.array()) as number[][];
 
   // Clean up
   predictions.dispose();
@@ -295,8 +342,8 @@ async function getPredictions(
 // Main function to analyze a medical image with the CNN model
 export async function analyzeWithCNN(
   imageBuffer: ArrayBuffer,
-  imageType = "mri"
-): Promise<any> {
+  imageType: ImageType = "mri"
+): Promise<CNNAnalysisResult> {
   // Validate image type
   if (!Object.keys(models).includes(imageType)) {
     throw new Error(`Unsupported image type: ${imageType}`);
@@ -339,7 +386,7 @@ export async function analyzeWithCNN(
         modelArchitecture: `CNN optimized for ${imageType.toUpperCase()} analysis`,
         inputDimensions:
           imageType === "mri" || imageType === "ct" ? "224x224x1" : "224x224x3",
-        processingTime: Math.floor(Math.random() * 500 + 500) + "ms", // Simulated processing time
+        processingTime: `${Math.floor(Math.random() * 500 + 500)}ms`, // Simulated processing time
         confidenceThreshold: 0.7,
         imageType: imageType.toUpperCase(),
       },
@@ -352,7 +399,7 @@ export async function analyzeWithCNN(
 }
 
 // Get categories based on image type
-function getCategoriesForImageType(imageType: string): string[] {
+function getCategoriesForImageType(imageType: ImageType): string[] {
   switch (imageType) {
     case "mri":
       return [
@@ -402,10 +449,10 @@ function getCategoriesForImageType(imageType: string): string[] {
 
 // Simulate detection of regions of interest in the medical image
 // In a real application, this would be based on actual model outputs
-function simulateRegionsOfInterest(imageType: string) {
+function simulateRegionsOfInterest(imageType: ImageType): RegionOfInterest[] {
   // Generate 1-4 regions of interest
   const numRegions = Math.floor(Math.random() * 4) + 1;
-  const regions = [];
+  const regions: RegionOfInterest[] = [];
 
   for (let i = 0; i < numRegions; i++) {
     regions.push({
@@ -416,7 +463,7 @@ function simulateRegionsOfInterest(imageType: string) {
         width: Math.floor(Math.random() * 50) + 20,
         height: Math.floor(Math.random() * 50) + 20,
       },
-      confidence: (Math.random() * 0.3 + 0.7).toFixed(2), // 0.7-1.0
+      confidence: +(Math.random() * 0.3 + 0.7).toFixed(2), // 0.7-1.0
       classification: getRandomClassificationForImageType(imageType),
       intensity: (Math.random() * 100).toFixed(1),
     });
@@ -426,8 +473,8 @@ function simulateRegionsOfInterest(imageType: string) {
 }
 
 // Get random classification based on image type
-function getRandomClassificationForImageType(imageType: string): string {
-  const classifications = {
+function getRandomClassificationForImageType(imageType: ImageType): string {
+  const classifications: Record<ImageType, string[]> = {
     mri: [
       "Potential tumor region",
       "Abnormal tissue density",
@@ -463,8 +510,6 @@ function getRandomClassificationForImageType(imageType: string): string {
     ],
   };
 
-  const options =
-    classifications[imageType as keyof typeof classifications] ||
-    classifications.mri;
+  const options = classifications[imageType];
   return options[Math.floor(Math.random() * options.length)];
 }
