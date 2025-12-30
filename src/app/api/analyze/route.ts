@@ -6,7 +6,7 @@ import { type NextRequest, NextResponse } from "next/server";
 import { cacheService } from "@/lib/helpers/cache";
 import {
   fallbackAnalyzer,
-  RegionOfInterest,
+  type RegionOfInterest,
 } from "@/lib/helpers/fallback-analyzer";
 import { queueSystem } from "@/lib/helpers/queue";
 import {
@@ -15,7 +15,7 @@ import {
 } from "@/lib/helpers/rate-limiter";
 // Import all services
 import { usageMonitor } from "@/lib/helpers/usage-monitor";
-import { CNNAnalysisResult } from "@/types/medical-analysis";
+import type { CNNAnalysisResult } from "@/types/medical-analysis";
 
 // Type definitions for CNN model response
 

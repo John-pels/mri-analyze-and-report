@@ -1,4 +1,4 @@
-import { CNNAnalysisResult } from "@/types/medical-analysis";
+import type { CNNAnalysisResult } from "@/types/medical-analysis";
 import * as tf from "@tensorflow/tfjs";
 
 // Define types for better type safety
@@ -23,31 +23,31 @@ interface RegionOfInterest {
   intensity: string;
 }
 
-interface FeatureAnalysis {
-  summary: string;
-  dimensionality: number;
-  sample: number[];
-}
+// interface FeatureAnalysis {
+//   summary: string;
+//   dimensionality: number;
+//   sample: number[];
+// }
 
-interface PredictionAnalysis {
-  categories: string[];
-  confidenceScores: number[];
-}
+// interface PredictionAnalysis {
+//   categories: string[];
+//   confidenceScores: number[];
+// }
 
-interface AnalysisMetadata {
-  modelArchitecture: string;
-  inputDimensions: string;
-  processingTime: string;
-  confidenceThreshold: number;
-  imageType: string;
-}
+// interface AnalysisMetadata {
+//   modelArchitecture: string;
+//   inputDimensions: string;
+//   processingTime: string;
+//   confidenceThreshold: number;
+//   imageType: string;
+// }
 
-interface AnalysisResult {
-  features: FeatureAnalysis;
-  predictions: PredictionAnalysis;
-  regionsOfInterest: RegionOfInterest[];
-  analysisMetadata: AnalysisMetadata;
-}
+// interface AnalysisResult {
+//   features: FeatureAnalysis;
+//   predictions: PredictionAnalysis;
+//   regionsOfInterest: RegionOfInterest[];
+//   analysisMetadata: AnalysisMetadata;
+// }
 
 const models: Record<ImageType, tf.LayersModel | null> = {
   mri: null,
