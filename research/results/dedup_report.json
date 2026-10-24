@@ -1,0 +1,31 @@
+{
+  "images_before": 3264,
+  "duplicate_copies_removed": 867,
+  "images_dropped_label_conflict": 39,
+  "images_after": 2358,
+  "groups_with_duplicates": 556,
+  "near_duplicate_hamming_threshold": 4,
+  "split_counts": {
+    "train": {
+      "total": 1650,
+      "tumour": 1450,
+      "healthy": 200
+    },
+    "val": {
+      "total": 354,
+      "tumour": 311,
+      "healthy": 43
+    },
+    "test": {
+      "total": 354,
+      "tumour": 311,
+      "healthy": 43
+    }
+  },
+  "class4_counts": {
+    "glioma_tumor": 761,
+    "meningioma_tumor": 689,
+    "pituitary_tumor": 622,
+    "no_tumor": 286
+  }
+}

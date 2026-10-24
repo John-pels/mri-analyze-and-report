@@ -1,515 +1,165 @@
-import type { CNNAnalysisResult } from "@/types/medical-analysis";
+"use client";
+
+import type { CNNAnalysisResult, RegionOfInterest } from "@/types/medical-analysis";
 import * as tf from "@tensorflow/tfjs";
 
-// Define types for better type safety
-type ImageType = "mri" | "ct" | "xray" | "ultrasound";
+// Runs entirely in the browser. The image never leaves the device; only the
+// structured result below is sent to the server for report generation.
 
-interface LayerConfig {
-  filters: number;
-  kernelSize: number;
-  dropout?: number;
+export type ImageType = "mri" | "ct" | "xray" | "ultrasound";
+
+interface ModelSpec {
+  url: string;
+  inputSize: number;
+  classes: string[];
+  normalClass: string;
+  version: string;
 }
 
-interface RegionOfInterest {
-  id: number;
-  location: {
-    x: number;
-    y: number;
-    width: number;
-    height: number;
-  };
-  confidence: number;
-  classification: string;
-  intensity: string;
+// Only modalities with a trained, evaluated model are listed here.
+export const MODEL_SPECS: Partial<Record<ImageType, ModelSpec>> = {
+  mri: {
+    url: "/models/mri/model.json",
+    inputSize: 64,
+    classes: ["No tumour", "Glioma", "Meningioma", "Pituitary tumour"],
+    normalClass: "No tumour",
+    version: "scnn-mri-4class-v1",
+  },
+};
+
+export function isModalitySupported(imageType: ImageType): boolean {
+  return Boolean(MODEL_SPECS[imageType]);
 }
 
-// interface FeatureAnalysis {
-//   summary: string;
-//   dimensionality: number;
-//   sample: number[];
-// }
+const cache: Partial<Record<ImageType, Promise<tf.LayersModel>>> = {};
 
-// interface PredictionAnalysis {
-//   categories: string[];
-//   confidenceScores: number[];
-// }
-
-// interface AnalysisMetadata {
-//   modelArchitecture: string;
-//   inputDimensions: string;
-//   processingTime: string;
-//   confidenceThreshold: number;
-//   imageType: string;
-// }
-
-// interface AnalysisResult {
-//   features: FeatureAnalysis;
-//   predictions: PredictionAnalysis;
-//   regionsOfInterest: RegionOfInterest[];
-//   analysisMetadata: AnalysisMetadata;
-// }
-
-const models: Record<ImageType, tf.LayersModel | null> = {
-  mri: null,
-  ct: null,
-  xray: null,
-  ultrasound: null,
-};
-
-const modelLoaded: Record<ImageType, boolean> = {
-  mri: false,
-  ct: false,
-  xray: false,
-  ultrasound: false,
-};
-
-const modelLoading: Record<ImageType, boolean> = {
-  mri: false,
-  ct: false,
-  xray: false,
-  ultrasound: false,
-};
-
-// Initialize and load the CNN model for a specific image type
-async function loadModel(imageType: ImageType): Promise<void> {
-  if (!Object.keys(models).includes(imageType)) {
-    throw new Error(`Unsupported image type: ${imageType}`);
+function loadModel(imageType: ImageType): Promise<tf.LayersModel> {
+  const spec = MODEL_SPECS[imageType];
+  if (!spec) {
+    throw new Error(`No trained model is available for ${imageType.toUpperCase()} images yet.`);
   }
-
-  if (modelLoaded[imageType] || modelLoading[imageType]) return;
-
-  modelLoading[imageType] = true;
-  try {
-    // Create a new CNN model for the specific image type
-    models[imageType] = await createMedicalImageModel(imageType);
-
-    // In a production app, you would load a pre-trained model instead:
-    // models[imageType] = await tf.loadLayersModel(`path/to/${imageType}_model.json`);
-
-    console.log(`CNN model for ${imageType} loaded successfully`);
-    modelLoaded[imageType] = true;
-  } catch (error) {
-    console.error(`Failed to load CNN model for ${imageType}:`, error);
-    throw new Error(`Failed to initialize the CNN model for ${imageType}`);
-  } finally {
-    modelLoading[imageType] = false;
-  }
+  cache[imageType] ??= tf.ready().then(() => tf.loadLayersModel(spec.url));
+  return cache[imageType] as Promise<tf.LayersModel>;
 }
 
-// Create a CNN model architecture for different medical image types
-async function createMedicalImageModel(
-  imageType: ImageType
-): Promise<tf.LayersModel> {
-  // This is a simplified CNN architecture for demonstration
-  // In a real application, you would use a more sophisticated architecture
-  // or a pre-trained model fine-tuned on specific medical image data
+async function decode(file: File): Promise<ImageBitmap> {
+  return createImageBitmap(file);
+}
 
-  const model = tf.sequential();
+// Grayscale, resize to the model input and scale to [0, 1] — matches training.
+function preprocess(bitmap: ImageBitmap, size: number): tf.Tensor4D {
+  return tf.tidy(() => {
+    const rgb = tf.browser.fromPixels(bitmap, 3).toFloat();
+    const gray = rgb.mean(2, true) as tf.Tensor3D;
+    const resized = tf.image.resizeBilinear(gray, [size, size]);
+    return resized.div(255).expandDims(0) as tf.Tensor4D;
+  });
+}
 
-  // Common base architecture with some type-specific adjustments
-  const inputChannels = imageType === "mri" || imageType === "ct" ? 1 : 3;
-  const initialFilters = getInitialFilters(imageType);
+// Grad-CAM (Selvaraju et al., 2017) on the last convolutional layer.
+function gradCam(model: tf.LayersModel, input: tf.Tensor4D, classIndex: number): tf.Tensor2D {
+  const convIdx = model.layers.map((l) => l.getClassName()).lastIndexOf("Conv2D");
+  const convModel = tf.model({ inputs: model.inputs, outputs: model.layers[convIdx].output as tf.SymbolicTensor });
+  const head = model.layers.slice(convIdx + 1);
 
-  // Input layer
-  model.add(
-    tf.layers.conv2d({
-      inputShape: [224, 224, inputChannels],
-      filters: initialFilters,
-      kernelSize: 3,
-      activation: "relu",
-      padding: "same",
-      name: "conv1",
-    })
-  );
+  return tf.tidy(() => {
+    const convOut = convModel.predict(input) as tf.Tensor4D;
+    const score = (c: tf.Tensor) => {
+      let y = c;
+      for (const layer of head) y = layer.apply(y) as tf.Tensor;
+      return y.gather([classIndex], 1).sum();
+    };
+    const grads = tf.grad(score)(convOut) as tf.Tensor4D;
+    const weights = grads.mean([1, 2], true);
+    const cam = tf.relu(convOut.mul(weights).sum(-1)).squeeze([0]) as tf.Tensor2D;
+    const max = cam.max();
+    return cam.div(tf.maximum(max, 1e-8)) as tf.Tensor2D;
+  });
+}
 
-  model.add(tf.layers.maxPooling2d({ poolSize: 2, name: "pool1" }));
-
-  // Add more convolutional layers based on image type
-  const layerConfig = getLayerConfig(imageType);
-
-  for (let i = 0; i < layerConfig.length; i++) {
-    const config = layerConfig[i];
-    const layerIndex = i + 2; // Start from 2 since we already have conv1 and pool1
-
-    model.add(
-      tf.layers.conv2d({
-        filters: config.filters,
-        kernelSize: config.kernelSize,
-        activation: "relu",
-        padding: "same",
-        name: `conv${layerIndex}`,
-      })
-    );
-
-    model.add(
-      tf.layers.maxPooling2d({ poolSize: 2, name: `pool${layerIndex}` })
-    );
-
-    if (config.dropout) {
-      model.add(
-        tf.layers.dropout({
-          rate: config.dropout,
-          name: `dropout${layerIndex}`,
-        })
-      );
+// Bounding box of the Grad-CAM cells at or above `threshold` of the peak.
+function boxFromCam(cam: number[][], threshold: number, width: number, height: number) {
+  const rows = cam.length;
+  const cols = cam[0].length;
+  let minR = rows;
+  let maxR = -1;
+  let minC = cols;
+  let maxC = -1;
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      if (cam[r][c] >= threshold) {
+        minR = Math.min(minR, r);
+        maxR = Math.max(maxR, r);
+        minC = Math.min(minC, c);
+        maxC = Math.max(maxC, c);
+      }
     }
   }
-
-  // Flatten the output for the dense layers
-  model.add(tf.layers.flatten({ name: "flatten" }));
-
-  // Dense layers for feature extraction
-  model.add(
-    tf.layers.dense({ units: 512, activation: "relu", name: "dense1" })
-  );
-  model.add(tf.layers.dropout({ rate: 0.5, name: "dropout_dense" }));
-
-  // Output layer - different number of classes based on image type
-  const outputUnits = getOutputUnits(imageType);
-  model.add(
-    tf.layers.dense({
-      units: outputUnits,
-      activation: "softmax",
-      name: "output",
-    })
-  );
-
-  // Compile the model
-  model.compile({
-    optimizer: "adam",
-    loss: "categoricalCrossentropy",
-    metrics: ["accuracy"],
-  });
-
-  return model;
-}
-
-// Helper functions for model configuration based on image type
-function getInitialFilters(imageType: ImageType): number {
-  switch (imageType) {
-    case "mri":
-      return 32;
-    case "ct":
-      return 32;
-    case "xray":
-      return 24;
-    case "ultrasound":
-      return 16;
-    default:
-      return 32;
-  }
-}
-
-function getLayerConfig(imageType: ImageType): LayerConfig[] {
-  switch (imageType) {
-    case "mri":
-      return [
-        { filters: 64, kernelSize: 3 },
-        { filters: 128, kernelSize: 3 },
-        { filters: 256, kernelSize: 3, dropout: 0.3 },
-      ];
-    case "ct":
-      return [
-        { filters: 64, kernelSize: 3 },
-        { filters: 128, kernelSize: 3 },
-        { filters: 256, kernelSize: 3, dropout: 0.3 },
-      ];
-    case "xray":
-      return [
-        { filters: 48, kernelSize: 3 },
-        { filters: 96, kernelSize: 3, dropout: 0.2 },
-      ];
-    case "ultrasound":
-      return [
-        { filters: 32, kernelSize: 3 },
-        { filters: 64, kernelSize: 3, dropout: 0.2 },
-      ];
-    default:
-      return [
-        { filters: 64, kernelSize: 3 },
-        { filters: 128, kernelSize: 3 },
-      ];
-  }
-}
-
-function getOutputUnits(imageType: ImageType): number {
-  switch (imageType) {
-    case "mri":
-      return 10;
-    case "ct":
-      return 8;
-    case "xray":
-      return 6;
-    case "ultrasound":
-      return 5;
-    default:
-      return 10;
-  }
-}
-
-// Preprocess the image for the CNN model
-async function preprocessImage(
-  imageBuffer: ArrayBuffer,
-  imageType: ImageType
-): Promise<tf.Tensor4D> {
-  // Convert the image buffer to a tensor using sharp
-  const sharp = require("sharp");
-  const imageData = await sharp(Buffer.from(imageBuffer))
-    .resize(224, 224)
-    .raw()
-    .toBuffer();
-  const image = tf.tensor3d(new Uint8Array(imageData), [224, 224, 3]);
-
-  // Resize to the expected input size (224x224)
-  const resized = tf.image.resizeBilinear(image, [224, 224]);
-
-  // Convert to grayscale for MRI and CT, keep color channels for others
-  let processed: tf.Tensor3D;
-  if (imageType === "mri" || imageType === "ct") {
-    processed = resized.mean(2, true);
-  } else {
-    processed = resized;
-  }
-
-  // Normalize pixel values to [0, 1]
-  const normalized = processed.div(tf.scalar(255));
-
-  // Add batch dimension
-  const batched = normalized.expandDims(0) as tf.Tensor4D;
-
-  // Clean up intermediate tensors
-  image.dispose();
-  resized.dispose();
-  if (processed !== resized) {
-    processed.dispose();
-  }
-
-  return batched;
-}
-
-// Extract features from the CNN model
-async function extractFeatures(
-  preprocessedImage: tf.Tensor4D,
-  imageType: ImageType
-): Promise<number[][]> {
-  const model = models[imageType];
-  if (!model) {
-    throw new Error(`Model for ${imageType} not loaded`);
-  }
-
-  // Get activations from an intermediate layer for feature extraction
-  const featureExtractionModel = tf.model({
-    inputs: model.inputs,
-    outputs: model.getLayer("dense1").output,
-  });
-
-  // Get the feature vector
-  const features = featureExtractionModel.predict(
-    preprocessedImage
-  ) as tf.Tensor;
-
-  // Convert to a JavaScript array
-  const featureArray = (await features.array()) as number[][];
-
-  // Clean up
-  features.dispose();
-
-  return featureArray;
-}
-
-// Run a forward pass through the model to get predictions
-async function getPredictions(
-  preprocessedImage: tf.Tensor4D,
-  imageType: ImageType
-): Promise<number[][]> {
-  const model = models[imageType];
-  if (!model) {
-    throw new Error(`Model for ${imageType} not loaded`);
-  }
-
-  // Get model predictions
-  const predictions = model.predict(preprocessedImage) as tf.Tensor;
-
-  // Convert to a JavaScript array
-  const predictionArray = (await predictions.array()) as number[][];
-
-  // Clean up
-  predictions.dispose();
-
-  return predictionArray;
-}
-
-// Main function to analyze a medical image with the CNN model
-export async function analyzeWithCNN(
-  imageBuffer: ArrayBuffer,
-  imageType: ImageType = "mri"
-): Promise<CNNAnalysisResult> {
-  // Validate image type
-  if (!Object.keys(models).includes(imageType)) {
-    throw new Error(`Unsupported image type: ${imageType}`);
-  }
-
-  // Ensure the model is loaded
-  await loadModel(imageType);
-
-  // Preprocess the image
-  const preprocessedImage = await preprocessImage(imageBuffer, imageType);
-
-  try {
-    // Extract features
-    const features = await extractFeatures(preprocessedImage, imageType);
-
-    // Get predictions
-    const predictions = await getPredictions(preprocessedImage, imageType);
-
-    // Get categories based on image type
-    const categories = getCategoriesForImageType(imageType);
-
-    // Simulate detection of regions of interest
-    // In a real application, this would be based on actual model outputs
-    const regionsOfInterest = simulateRegionsOfInterest(imageType);
-
-    // Return a structured analysis result
-    return {
-      features: {
-        summary: `Feature vector extracted from dense layer for ${imageType.toUpperCase()}`,
-        dimensionality: features[0].length,
-        // Include only a sample of the features to keep the response size reasonable
-        sample: features[0].slice(0, 10),
-      },
-      predictions: {
-        categories,
-        confidenceScores: predictions[0],
-      },
-      regionsOfInterest,
-      analysisMetadata: {
-        modelArchitecture: `CNN optimized for ${imageType.toUpperCase()} analysis`,
-        inputDimensions:
-          imageType === "mri" || imageType === "ct" ? "224x224x1" : "224x224x3",
-        processingTime: `${Math.floor(Math.random() * 500 + 500)}ms`, // Simulated processing time
-        confidenceThreshold: 0.7,
-        imageType: imageType.toUpperCase(),
-      },
-    };
-  } finally {
-    // Clean up tensors
-    preprocessedImage.dispose();
-    tf.disposeVariables();
-  }
-}
-
-// Get categories based on image type
-function getCategoriesForImageType(imageType: ImageType): string[] {
-  switch (imageType) {
-    case "mri":
-      return [
-        "Normal tissue",
-        "Brain tumor - Glioma",
-        "Brain tumor - Meningioma",
-        "Brain tumor - Pituitary",
-        "Potential abnormality",
-        "Inflammation",
-        "Fluid accumulation",
-        "Bone abnormality",
-        "Tissue damage",
-        "Vascular issue",
-      ];
-    case "ct":
-      return [
-        "Normal tissue",
-        "Bone abnormality",
-        "Soft tissue mass",
-        "Fluid collection",
-        "Calcification",
-        "Hemorrhage",
-        "Air/gas presence",
-        "Foreign body",
-      ];
-    case "xray":
-      return [
-        "Normal",
-        "Pneumonia",
-        "Fracture",
-        "Mass/nodule",
-        "Pleural effusion",
-        "Cardiomegaly",
-      ];
-    case "ultrasound":
-      return [
-        "Normal tissue",
-        "Cyst",
-        "Solid mass",
-        "Fluid collection",
-        "Calcification",
-      ];
-    default:
-      return ["Normal", "Abnormal", "Requires further investigation"];
-  }
-}
-
-// Simulate detection of regions of interest in the medical image
-// In a real application, this would be based on actual model outputs
-function simulateRegionsOfInterest(imageType: ImageType): RegionOfInterest[] {
-  // Generate 1-4 regions of interest
-  const numRegions = Math.floor(Math.random() * 4) + 1;
-  const regions: RegionOfInterest[] = [];
-
-  for (let i = 0; i < numRegions; i++) {
-    regions.push({
-      id: i + 1,
-      location: {
-        x: Math.floor(Math.random() * 224),
-        y: Math.floor(Math.random() * 224),
-        width: Math.floor(Math.random() * 50) + 20,
-        height: Math.floor(Math.random() * 50) + 20,
-      },
-      confidence: +(Math.random() * 0.3 + 0.7).toFixed(2), // 0.7-1.0
-      classification: getRandomClassificationForImageType(imageType),
-      intensity: (Math.random() * 100).toFixed(1),
-    });
-  }
-
-  return regions;
-}
-
-// Get random classification based on image type
-function getRandomClassificationForImageType(imageType: ImageType): string {
-  const classifications: Record<ImageType, string[]> = {
-    mri: [
-      "Potential tumor region",
-      "Abnormal tissue density",
-      "Region of interest",
-      "Signal intensity change",
-      "Contrast enhancement",
-      "Tumor boundary",
-      "Edema surrounding lesion",
-      "Glioma characteristics",
-      "Tumor core",
-      "Necrotic tissue",
-    ],
-    ct: [
-      "Density variation",
-      "Potential lesion",
-      "Contrast enhancement",
-      "Structural abnormality",
-      "Tissue boundary",
-    ],
-    xray: [
-      "Opacity",
-      "Radiolucency",
-      "Structural change",
-      "Potential fracture",
-      "Soft tissue mass",
-    ],
-    ultrasound: [
-      "Hypoechoic region",
-      "Hyperechoic region",
-      "Cystic structure",
-      "Solid mass",
-      "Acoustic shadowing",
-    ],
+  if (maxR < 0) return null;
+  const sx = width / cols;
+  const sy = height / rows;
+  return {
+    x: Math.round(minC * sx),
+    y: Math.round(minR * sy),
+    width: Math.round((maxC - minC + 1) * sx),
+    height: Math.round((maxR - minR + 1) * sy),
   };
+}
 
-  const options = classifications[imageType];
-  return options[Math.floor(Math.random() * options.length)];
+export async function analyzeWithCNN(file: File, imageType: ImageType = "mri"): Promise<CNNAnalysisResult> {
+  const spec = MODEL_SPECS[imageType];
+  if (!spec) {
+    throw new Error(`No trained model is available for ${imageType.toUpperCase()} images yet.`);
+  }
+  const model = await loadModel(imageType);
+  const bitmap = await decode(file);
+  const input = preprocess(bitmap, spec.inputSize);
+
+  const t0 = performance.now();
+  const probsTensor = model.predict(input) as tf.Tensor2D;
+  const probs = Array.from(await probsTensor.data());
+  const inferenceMs = performance.now() - t0;
+  probsTensor.dispose();
+
+  const top = probs.indexOf(Math.max(...probs));
+  const regionsOfInterest: RegionOfInterest[] = [];
+
+  if (spec.classes[top] !== spec.normalClass) {
+    const camTensor = gradCam(model, input, top);
+    const cam = (await camTensor.array()) as number[][];
+    camTensor.dispose();
+    // 0.7 of the peak: on the test set the median box covers ~11% of the image.
+    const box = boxFromCam(cam, 0.7, bitmap.width, bitmap.height);
+    if (box) {
+      regionsOfInterest.push({
+        id: 1,
+        location: box,
+        confidence: +probs[top].toFixed(2),
+        classification: `${spec.classes[top]} (Grad-CAM)`,
+        intensity: "n/a",
+      });
+    }
+  }
+  input.dispose();
+  bitmap.close();
+
+  return {
+    features: {
+      summary: `Class probabilities from ${spec.version}`,
+      dimensionality: probs.length,
+      sample: probs.map((p) => +p.toFixed(4)),
+    },
+    predictions: {
+      categories: spec.classes,
+      confidenceScores: probs.map((p) => +p.toFixed(4)),
+    },
+    regionsOfInterest,
+    analysisMetadata: {
+      modelArchitecture: spec.version,
+      inputDimensions: `${spec.inputSize}x${spec.inputSize}x1`,
+      processingTime: `${inferenceMs.toFixed(1)}ms`,
+      confidenceThreshold: 0.5,
+      imageType,
+    },
+  };
 }

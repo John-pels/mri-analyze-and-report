@@ -1,4 +1,3 @@
-import { analyzeWithCNN } from "@/lib/cnn-model";
 import { GoogleGenerativeAI } from "@google/generative-ai";
 // app/api/analyze/route.ts
 import { type NextRequest, NextResponse } from "next/server";
@@ -24,6 +23,8 @@ interface CNNResults {
   confidence: number;
   predictions: string[];
   regionsOfInterest: RegionOfInterest[];
+  processingTime?: string;
+  modelVersion?: string;
   error?: string;
 }
 
@@ -69,11 +70,6 @@ interface RateLimit {
   retryAfter?: number;
 }
 
-interface QueueStats {
-  pending: number;
-  processing: number;
-}
-
 interface UsageRequest {
   apiUsed: string;
   success: boolean;
@@ -92,11 +88,6 @@ interface OpenAIResponse {
   }>;
 }
 
-interface QueueResult {
-  jobId: string;
-  analysis: string;
-  processedAt: string;
-}
 
 interface CacheOptions {
   ttl: number;
@@ -118,15 +109,9 @@ function getClientIP(request: NextRequest): string {
   return "unknown";
 }
 
-// Helper function to determine if we should use queue
-function shouldUseQueue(imageSize: number, currentLoad: number): boolean {
-  // Use queue for large files or high system load
-  return imageSize > 1024 * 1024 || currentLoad > 5; // 1MB or more than 5 concurrent requests
-}
-
 // Main analysis function (extracted from the route handler)
 async function performAnalysis(
-  imageBuffer: ArrayBuffer,
+  cnn: CNNAnalysisResult,
   imageType: "mri" | "ct" | "xray" | "ultrasound",
   prompt?: string
 ): Promise<AnalysisResult> {
@@ -137,32 +122,18 @@ async function performAnalysis(
   let errorType: string | undefined;
 
   try {
-    // Try CNN analysis first
-    try {
-      const cnnAnalysis: CNNAnalysisResult = await analyzeWithCNN(
-        imageBuffer,
-        imageType
-      );
-
-      // Convert CNN analysis result to expected format
-      const maxConfidence = Math.max(
-        ...cnnAnalysis.predictions.confidenceScores
-      );
-      cnnResults = {
-        confidence: maxConfidence,
-        predictions: cnnAnalysis.predictions.categories,
-        regionsOfInterest: cnnAnalysis.regionsOfInterest,
-      };
-    } catch (cnnError) {
-      console.error("CNN analysis failed:", cnnError);
-      errorType = "cnn_failure";
-      cnnResults = {
-        confidence: 0.5,
-        predictions: ["Analysis pending"],
-        regionsOfInterest: [],
-        error: "CNN analysis unavailable",
-      };
-    }
+    // The CNN ran in the browser; only its structured output reaches the server.
+    const scores = cnn.predictions.confidenceScores;
+    const top = scores.indexOf(Math.max(...scores));
+    cnnResults = {
+      confidence: scores[top],
+      predictions: cnn.predictions.categories.map(
+        (c, i) => `${c}: ${(scores[i] * 100).toFixed(1)}%`
+      ),
+      regionsOfInterest: cnn.regionsOfInterest,
+      processingTime: cnn.analysisMetadata.processingTime,
+      modelVersion: cnn.analysisMetadata.modelArchitecture,
+    };
 
     // Prepare analysis prompt
     const analysisPrompt = `
@@ -402,48 +373,36 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
     type ImageType = "mri" | "ct" | "xray" | "ultrasound";
 
-    // Parse form data
-    const formData = await request.formData();
-    const imageFile = formData.get("image") as File | null;
-    const prompt = formData.get("prompt") as string | null;
-    const imageType = (formData.get("imageType") as ImageType) || "mri";
-    const useQueue = formData.get("useQueue") === "true";
+    // Parse the JSON payload: CNN output computed in the browser + prompt.
+    // No image data is accepted by this route.
+    const body = (await request.json()) as {
+      cnn?: CNNAnalysisResult;
+      prompt?: string | null;
+      imageType?: ImageType;
+    };
+    const cnn = body.cnn;
+    const prompt = body.prompt ?? null;
+    const imageType: ImageType = body.imageType || "mri";
 
-    // Validate inputs
-    if (!imageFile) {
+    if (!cnn?.predictions?.confidenceScores?.length) {
       return NextResponse.json(
-        { error: "No image file provided" },
+        { error: "Missing CNN result in request body" },
         { status: 400 }
       );
     }
 
-    // Check file size
-    const MAX_FILE_SIZE = 3 * 1024 * 1024; // 3MB
-    if (imageFile.size > MAX_FILE_SIZE) {
-      return NextResponse.json(
-        { error: "File too large (max 3MB)" },
-        { status: 400 }
-      );
-    }
+    // Cache key is derived from the CNN output, not from image pixels.
+    const payloadBytes = new TextEncoder().encode(
+      JSON.stringify(cnn.predictions)
+    );
+    const imageBuffer = payloadBytes.buffer as ArrayBuffer;
+    const imageFile = { size: payloadBytes.byteLength };
 
-    // Validate file type
-    const allowedTypes = ["image/jpeg", "image/jpg", "image/png", "image/gif"];
-    if (!allowedTypes.includes(imageFile.type)) {
-      return NextResponse.json(
-        {
-          error: "Invalid file type. Please upload a JPEG, PNG, or GIF image.",
-        },
-        { status: 400 }
-      );
-    }
-
-    // Convert to array buffer
-    const imageBuffer = await imageFile.arrayBuffer();
-
-    // Check cache first
+    // Check cache first (exact match only: the size-based "similarity"
+    // lookup could return another image's report)
     const cachedResult: {
       metadata?: { fileSize?: number | undefined } | undefined;
-    } | null = cacheService.get(imageBuffer, imageType, prompt ?? undefined);
+    } | null = cacheService.get(imageBuffer, imageType, prompt ?? undefined, false);
     if (cachedResult) {
       // Log cache hit
       const cacheRequest: UsageRequest = {
@@ -466,41 +425,13 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       });
     }
 
-    // Determine if we should use queue
-    const queueStats: QueueStats = queueSystem.getStats();
-    const shouldQueue =
-      useQueue || shouldUseQueue(imageFile.size, queueStats.processing);
-
+    const shouldQueue = false;
     let result: AnalysisResult;
-
-    if (shouldQueue) {
-      // Add to queue
-      const estimatedWait = queueSystem.getEstimatedWaitTime();
-
-      // Return immediate response with queue information
-      if (estimatedWait > 10000) {
-        // More than 10 seconds
-        const _queueResult: QueueResult = await queueSystem.addJob(
-          imageBuffer,
-          imageType,
-          prompt ?? undefined,
-          1
-        );
-
-        return NextResponse.json({
-          queued: true,
-          estimatedWait: Math.ceil(estimatedWait / 1000),
-          message: "Request queued for processing due to high load",
-          queuePosition: queueStats.pending + 1,
-          jobId: "queue_job_id", // In real implementation, you'd return the actual job ID
-        });
-      }
-    }
 
     // Process immediately
     try {
       result = await performAnalysis(
-        imageBuffer,
+        cnn,
         imageType,
         prompt || undefined
       );
@@ -576,7 +507,6 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     // Add additional metadata
     result.metadata = {
       ...result.metadata,
-      fileName: imageFile.name,
       fileSize: imageFile.size,
       clientIP: clientIP.replace(/\d+\.\d+\.\d+\./, "xxx.xxx.xxx."), // Anonymize
       fromCache: false,

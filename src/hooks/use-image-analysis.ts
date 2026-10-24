@@ -3,8 +3,9 @@
 import { useState } from "react";
 
 import { analyzeImage } from "@/lib/analyze-image";
+import { isModalitySupported } from "@/lib/cnn-model";
 import { useToast } from "./use-toast";
-import { RegionOfInterest } from "@/types/medical-analysis";
+import type { RegionOfInterest } from "@/types/medical-analysis";
 
 type AnalysisType = "general" | "detailed" | "medical";
 type AnalysisStatus = "idle" | "loading" | "success" | "error";
@@ -91,6 +92,15 @@ export function useImageAnalysis() {
         variant: "destructive",
         title: "No image selected",
         description: "Please upload a medical image first",
+      });
+      return;
+    }
+
+    if (!isModalitySupported(imageType)) {
+      toast({
+        variant: "destructive",
+        title: "Modality not supported yet",
+        description: `No trained model is available for ${imageType.toUpperCase()} images. Only brain MRI is supported in this version.`,
       });
       return;
     }

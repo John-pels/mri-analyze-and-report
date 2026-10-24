@@ -1,0 +1,35 @@
+{
+  "best": {
+    "config_id": 70.0,
+    "lr": 0.001,
+    "batch_size": 20.0,
+    "n_conv": 4.0,
+    "n_dense": 2.0,
+    "epochs": 25.0,
+    "seconds": 260.2,
+    "val_accuracy": 0.95763,
+    "val_sensitivity": 0.95498,
+    "val_specificity": 0.97674,
+    "val_precision": 0.99664,
+    "val_f1": 0.97537,
+    "val_mcc": 0.83407,
+    "val_auc": 0.98766
+  },
+  "second": {
+    "config_id": 69.0,
+    "lr": 0.001,
+    "batch_size": 20.0,
+    "n_conv": 4.0,
+    "n_dense": 1.0,
+    "epochs": 25.0,
+    "seconds": 259.3,
+    "val_accuracy": 0.94915,
+    "val_sensitivity": 0.95498,
+    "val_specificity": 0.90698,
+    "val_precision": 0.98671,
+    "val_f1": 0.97059,
+    "val_mcc": 0.78919,
+    "val_auc": 0.98235
+  },
+  "criterion": "validation MCC, ties broken by validation AUC then sensitivity"
+}

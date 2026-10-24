@@ -1,0 +1,1 @@
+{"backend":"cpu","n":354,"maxAbsDiff":5.960464477539062e-7,"top1Agreement":1,"batchMs":94551.865415,"singleImageMedianMs":174.35799200000474,"gradCamShape":[8,8]}

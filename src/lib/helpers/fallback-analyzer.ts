@@ -53,27 +53,15 @@ class FallbackAnalyzer {
     return {
       mri: {
         title: "MRI Brain Scan Analysis",
-        generalFindings: [
-          "Brain tissue appears to show normal cortical thickness",
-          "Ventricular system appears within normal limits",
-          "No obvious mass lesions detected in this automated analysis",
-          "Gray-white matter differentiation preserved",
-          "Cerebral sulci and gyri pattern appears normal",
-          "No significant midline shift observed",
-        ],
+        // No fixed findings: the report states only what the CNN produced.
+        generalFindings: [],
         recommendations: [
           "Clinical correlation strongly recommended",
           "Consider follow-up imaging if symptoms persist",
           "Professional radiologist review required for definitive interpretation",
           "Additional sequences may be needed based on clinical indication",
         ],
-        specificChecks: [
-          "Ventricular size assessment",
-          "Cortical atrophy evaluation",
-          "White matter integrity analysis",
-          "Basal ganglia examination",
-          "Posterior fossa structures review",
-        ],
+        specificChecks: [],
         disclaimer:
           "This automated analysis is preliminary and cannot replace professional radiological interpretation.",
       },
@@ -181,8 +169,12 @@ class FallbackAnalyzer {
   **Confidence Assessment:**
   ${confidenceAnalysis}
   
-  **Automated Checks Performed:**
-  ${template.specificChecks.map((check) => `• ${check}`).join("\n")}
+  ${
+    template.specificChecks.length > 0
+      ? `**Automated Checks Performed:**
+  ${template.specificChecks.map((check) => `• ${check}`).join("\n")}`
+      : ""
+  }
   
   **Clinical Recommendations:**
   ${template.recommendations.map((rec) => `• ${rec}`).join("\n")}
@@ -236,8 +228,7 @@ class FallbackAnalyzer {
   
   **Technical Metadata:**
   • Processing timestamp: ${new Date().toISOString()}
-  • Analysis method: Hybrid CNN-Template approach
-  • Image quality: ${this.assessImageQuality(cnnResults)}
+  • Analysis method: CNN output with template report (no LLM available)
   • System version: v2.1.0
       `.trim();
 
@@ -276,7 +267,9 @@ class FallbackAnalyzer {
     }
 
     if (cnnResults.predictions && cnnResults.predictions.length > 0) {
-      enhanced.push(`Automated detection suggests: ${cnnResults.predictions.join(", ")}`);
+      enhanced.push(
+        `CNN class probabilities (screening output, not a diagnosis): ${cnnResults.predictions.join(", ")}`
+      );
     }
 
     if (severity === "high") {
@@ -288,12 +281,12 @@ class FallbackAnalyzer {
 
   private analyzeRegions(regions: RegionOfInterest[]): string {
     if (!regions || regions.length === 0) {
-      return "• No specific regions flagged by automated analysis\n• Full image reviewed systematically";
+      return "• No region shown (top class is no tumour, or no Grad-CAM region above threshold)";
     }
 
     return regions
       .map((region, index) => {
-        return `• Region ${index + 1}: ${region.description || "Area of interest identified"} 
+        return `• Region ${index + 1}: ${region.description || region.classification || "Area of interest identified"} 
     ${region.confidence ? `(Confidence: ${(region.confidence * 100).toFixed(1)}%)` : ""}`;
       })
       .join("\n");
@@ -303,7 +296,7 @@ class FallbackAnalyzer {
     const confidence = cnnResults.confidence || 0.5;
 
     if (confidence >= 0.8) {
-      return "• High confidence in automated analysis results\n• Consistent with expected imaging patterns";
+      return "• High model probability for the top class\n• Model probability is not a measure of diagnostic certainty";
     }
     if (confidence >= 0.6) {
       return "• Moderate confidence in automated analysis\n• Recommend professional verification";

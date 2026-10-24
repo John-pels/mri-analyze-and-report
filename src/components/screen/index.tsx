@@ -178,22 +178,22 @@ export function LandingPage() {
                     MRI Scan
                   </div>
                 </SelectItem>
-                <SelectItem value="ct">
+                <SelectItem value="ct" disabled>
                   <div className="flex items-center">
                     <Layers className="h-4 w-4 mr-2" />
-                    CT Scan
+                    CT Scan (no trained model yet)
                   </div>
                 </SelectItem>
-                <SelectItem value="xray">
+                <SelectItem value="xray" disabled>
                   <div className="flex items-center">
                     <Scan className="h-4 w-4 mr-2" />
-                    X-Ray
+                    X-Ray (no trained model yet)
                   </div>
                 </SelectItem>
-                <SelectItem value="ultrasound">
+                <SelectItem value="ultrasound" disabled>
                   <div className="flex items-center">
                     <Microscope className="h-4 w-4 mr-2" />
-                    Ultrasound
+                    Ultrasound (no trained model yet)
                   </div>
                 </SelectItem>
               </SelectContent>
@@ -374,8 +374,8 @@ export function LandingPage() {
                     </div>
                   )}
                   <div className="prose prose-sm max-w-none dark:prose-invert">
-                    {analysisResult.split("\n").map((line) => (
-                      <ReactMarkdown key={line} remarkPlugins={[remarkGfm]}>
+                    {analysisResult.split("\n").map((line, i) => (
+                      <ReactMarkdown key={`${i}-${line}`} remarkPlugins={[remarkGfm]}>
                         {normalizeMarkdown(line)}
                       </ReactMarkdown>
                     ))}
